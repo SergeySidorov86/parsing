@@ -1,0 +1,120 @@
+import requests
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from fake_useragent import UserAgent
+import pandas as pd
+import math
+from random import choice
+from selenium.webdriver.common.proxy import *
+
+def get_proxy():
+    html = requests.get('https://free-proxy-list.net/',headers={'User-Agent': UserAgent().firefox}).text
+    soup = BeautifulSoup(html, 'lxml')
+
+    trs = soup.find('table', id='proxylisttable').find_all('tr')[1:11]
+
+    proxies = []
+
+    for tr in trs:
+        tds = tr.find_all('td')
+        if 'yes' in tds[6].text.strip():
+            ip = tds[0].text.strip()
+            port = tds[1].text.strip()
+            schema = 'https' if 'yes' in tds[6].text.strip() else 'http'
+            proxy = {'schema': schema, 'address': ip + ':' + port}
+            proxies.append(proxy)
+
+    return choice(proxies)
+
+def get_html(url, browser):
+    browser.get(url)
+    requiredHtml = browser.page_source
+    #r = requests.get(url,headers={'User-Agent': UserAgent().chrome})
+    return requiredHtml
+
+def numfromstr(s):
+    l = len(s)
+    i = 0
+    s_int = ''
+    while i < l:
+        if '0' <= s[i] <= '9':
+            s_int += s[i]
+        i = i + 1
+    if s_int:
+        return float(s_int)
+    else:
+        return 0
+    
+def get_list(url, browser):
+    soup = BeautifulSoup(get_html(url, browser), 'lxml')
+    num_items = int(soup.find('span', class_="total many").span.text)
+    num_pages = min(50,math.ceil(num_items/100))
+    print(num_pages)
+    divs = soup.find_all('div', class_="dtList i-dtList j-card-item")
+    links = []
+    for d in divs:
+        link = d.find('a', class_="ref_goods_n_p")['href'].strip()
+        links.append(link)
+
+
+    if num_pages > 1:
+        for page in range(2,num_pages+1):
+            soup = BeautifulSoup(get_html(url + '&page=' + str(page), browser), 'lxml')
+            divs = soup.find_all('div', class_="dtList i-dtList j-card-item")
+            for d in divs:
+                link = d.find('a', class_="ref_goods_n_p")['href'].strip()
+                links.append(link)
+        
+    return links   
+
+def get_item(html, browser):
+    soup = BeautifulSoup(html, 'lxml')
+    article=soup.find('span', class_='j-article').text.strip()
+    name=soup.find('span', class_='name').text.strip()
+    brand=soup.find('span', class_='brand').text.strip()
+    price = numfromstr(soup.find('span', class_='final-cost').text.strip())
+    orders_count = numfromstr(soup.find('span', class_='j-orders-count').text.strip())
+    comments = int(soup.find('a', id="comments_reviews_link").i.text.strip())
+    rating = int(soup.find('div', class_="product-rating").p.text.strip())
+    #first_comment = soup.find('div', class_="time text-base-gray").p.text.strip()
+    browser.find_element_by_link_text('дате').click()
+    first_comment = browser.find_element_by_class_name('time.text-base-gray').get_attribute('content')
+    
+    item = {'article': article, 'brand': brand,'name': name,  'price': price,  'comments': comments,  'orders_count': orders_count,  'rating': rating,  'first_comment': first_comment}
+    return item
+
+
+    
+    
+def main():
+    url = 'https://www.wildberries.ru/catalog/0/search.aspx?kind=2&subject=4&search=%D0%BA%D1%83%D0%BF%D0%B0%D0%BB%D1%8C%D0%BD%D0%B8%D0%BA%20%D0%B6%D0%B5%D0%BD%D1%81%D0%BA%D0%B8%D0%B9&sort=popular'
+
+    # путь к драйверу chrome
+    firefoxdriver = 'C:\Work\drive\geckodriver.exe'
+    options = webdriver.FirefoxOptions()
+    options.headless = True
+    profile = webdriver.FirefoxProfile()
+    profile.set_preference("general.useragent.override", UserAgent().random)
+
+    
+    PROXY = get_proxy()['address']
+    print(PROXY)
+    
+    proxy = Proxy({
+        'proxyType': ProxyType.MANUAL,
+        'httpProxy': PROXY,
+        'ftpProxy': PROXY,
+        'sslProxy': PROXY,
+        'noProxy':''})
+    
+    browser = webdriver.Firefox(executable_path=firefoxdriver, options=options, proxy=proxy, firefox_profile=profile) 
+    
+    
+    links = get_list(url, browser)
+    
+    df = pd.DataFrame(links).to_csv('links2.csv', index=False, header=False)
+
+    browser.close() 
+
+if __name__ == '__main__':
+    main()
